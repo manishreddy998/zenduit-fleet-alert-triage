@@ -1,36 +1,32 @@
-"""Hybrid triage. Deterministic safety rules first, then a learned ranker for the rest.
-
-Safety rules can never be overridden by the model, so a collision or critical
-engine fault is always escalated no matter what the score says.
-"""
+"""Hybrid triage on real sensor alerts. A hard safety rule first (very hard braking or
+acceleration is always shown), then a logistic ranker decides which other alerts a fleet
+manager sees. The model can never hide an alert that the safety rule escalates."""
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from .data import TYPES
+
+HARD_ACC = 4.0  # m/s^2, about 0.4 g
 
 
 def is_safety_critical(a):
-    return a["type"] == "collision" or a["dtc_sev"] == 3 or a["g"] >= 1.5
+    return a["acc_xy"] >= HARD_ACC
 
 
 def features(a):
-    onehot = [int(a["type"] == t) for t in TYPES]
-    return onehot + [a["speed"] / 100, a["g"], a["dtc_sev"], a["night"], a["prior_events"], a["repeats_1h"]]
+    return [a["acc_xy"], a["acc_z"], a["gyro_z"], a["gyro_xy"], np.log1p(a["duration"])]
 
 
 class Triage:
-    def __init__(self, threshold=0.2):
-        self.threshold = threshold
-        self.clf = LogisticRegression(max_iter=1000)
+    def __init__(self, threshold=0.3):
+        self.threshold = threshold; self.lr = LogisticRegression(max_iter=1000, class_weight="balanced")
 
     def fit(self, rows):
-        X = np.array([features(r) for r in rows]); y = np.array([r["actionable"] for r in rows])
-        self.clf.fit(X, y); return self
+        self.lr.fit(np.array([features(a) for a in rows]), [a["actionable"] for a in rows]); return self
 
     def score(self, a):
-        return float(self.clf.predict_proba(np.array([features(a)]))[0, 1])
+        return float(self.lr.predict_proba(np.array([features(a)]))[0, 1])
 
     def decide(self, a):
-        if is_safety_critical(a):
-            return {"action": "escalate", "reason": "safety rule", "score": 1.0}
         s = self.score(a)
-        return {"action": "notify" if s >= self.threshold else "suppress", "reason": "ranker", "score": round(s, 3)}
+        if is_safety_critical(a):
+            return {"action": "escalate", "score": s, "why": "hard acceleration rule"}
+        return {"action": "notify" if s >= self.threshold else "suppress", "score": s, "why": "ranker"}

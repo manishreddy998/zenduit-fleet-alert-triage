@@ -1,0 +1,45 @@
+{
+  "show_all": {
+    "alerts_shown": 317,
+    "precision": 0.189,
+    "event_recall": 1.0,
+    "events_missed": 0
+  },
+  "strict_rule (acc>=3 or gyro>=0.6)": {
+    "alerts_shown": 158,
+    "precision": 0.335,
+    "event_recall": 0.982,
+    "events_missed": 1
+  },
+  "hybrid (rule + ranker, thr 0.3)": {
+    "alerts_shown": 142,
+    "precision": 0.359,
+    "event_recall": 0.945,
+    "events_missed": 3
+  },
+  "_counts": {
+    "alerts": 317,
+    "actionable": 60,
+    "events": 69,
+    "aggressive_events": 55,
+    "safety_rule_hits": 81
+  },
+  "hybrid (rule + ranker, thr 0.5)": {
+    "alerts_shown": 95,
+    "precision": 0.505,
+    "event_recall": 0.909,
+    "events_missed": 5
+  },
+  "hybrid (rule + ranker, thr 0.7)": {
+    "alerts_shown": 82,
+    "precision": 0.573,
+    "event_recall": 0.891,
+    "events_missed": 6
+  },
+  "qwen2.5-3b judge": {
+    "alerts_shown": 237,
+    "precision": 0.241,
+    "event_recall": 0.982,
+    "events_missed": 1
+  }
+}

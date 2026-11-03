@@ -1,39 +1,40 @@
-import json, time
+"""Leave one trip out evaluation on the real Driver Behavior Dataset.
+Baselines: show every device alert, and a single stricter threshold rule.
+Metrics: alerts shown, precision, and event recall (share of the 55 labelled aggressive
+events with at least one shown alert)."""
+import json
 from pathlib import Path
-from .data import generate
+from .data import all_alerts, all_events, TRIPS
 from .model import Triage, is_safety_critical
 
+OUT = Path(__file__).resolve().parent.parent / "docs"
 
-def main():
-    rows = generate()
-    train, test = rows[:4000], rows[4000:]
-    m = Triage().fit(train)
-    t0 = time.perf_counter()
-    curve = []
-    for th in [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6]:
-        m.threshold = th
-        dec = [m.decide(a) for a in test]
-        shown = [d["action"] != "suppress" for d in dec]
-        act = [a["actionable"] for a in test]
-        tp = sum(s and y for s, y in zip(shown, act))
-        curve.append({"threshold": th, "alerts_shown": sum(shown), "share_suppressed": round(1 - sum(shown) / len(test), 3),
-                      "actionable_recall": round(tp / sum(act), 3), "precision_of_shown": round(tp / max(1, sum(shown)), 3)})
-    ms = (time.perf_counter() - t0) * 1000 / (len(test) * 7)
-    m.threshold = 0.2
-    crit = [a for a in test if is_safety_critical(a)]
-    missed_crit = sum(m.decide(a)["action"] != "escalate" for a in crit)
-    base_prec = round(sum(a["actionable"] for a in test) / len(test), 3)
-    out = {"train": len(train), "test": len(test), "baseline_show_everything": {"alerts_shown": len(test), "precision_of_shown": base_prec},
-           "curve": curve, "safety_critical_in_test": len(crit), "safety_critical_missed": missed_crit, "ms_per_alert": round(ms, 3)}
-    Path("results.json").write_text(json.dumps(out, indent=2))
-    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(6.5, 3.5))
-    ax.plot([c["share_suppressed"] for c in curve], [c["actionable_recall"] for c in curve], "o-", color="#2563eb")
-    for c in curve: ax.annotate(str(c["threshold"]), (c["share_suppressed"], c["actionable_recall"]), fontsize=8, xytext=(3, 3), textcoords="offset points")
-    ax.set_xlabel("share of alerts suppressed"); ax.set_ylabel("recall of actionable alerts"); ax.set_title("Noise cut vs actionable recall (labels = threshold)")
-    ax.grid(alpha=.3); fig.tight_layout(); fig.savefig("docs/results.png", dpi=130)
-    print(json.dumps(out, indent=2))
+
+def metrics(A, E, shown):
+    S = [a for a, s in zip(A, shown) if s]
+    agg = [e for e in E if e["aggressive"]]
+    hit = sum(any(a["trip"] == e["trip"] and a["start"] < e["end"] and a["end"] > e["start"] for a in S) for e in agg)
+    return {"alerts_shown": len(S), "precision": round(sum(a["actionable"] for a in S) / max(len(S), 1), 3),
+            "event_recall": round(hit / len(agg), 3), "events_missed": len(agg) - hit}
+
+
+def run(threshold=0.5):
+    A, E = all_alerts(), all_events(); res = {}
+    res["show_all"] = metrics(A, E, [True] * len(A))
+    res["strict_rule (acc>=3 or gyro>=0.6)"] = metrics(A, E, [a["acc_xy"] >= 3 or a["gyro_z"] >= 0.6 for a in A])
+    dec = [None] * len(A)
+    for t in TRIPS:
+        m = Triage(threshold).fit([a for a in A if a["trip"] != t])
+        for i, a in enumerate(A):
+            if a["trip"] == t: dec[i] = m.decide(a)
+    res[f"hybrid (rule + ranker, thr {threshold})"] = metrics(A, E, [d["action"] != "suppress" for d in dec])
+    res["_counts"] = {"alerts": len(A), "actionable": sum(a["actionable"] for a in A), "events": len(E),
+                      "aggressive_events": sum(e["aggressive"] for e in E), "safety_rule_hits": sum(map(is_safety_critical, A))}
+    return res, A, dec
 
 
 if __name__ == "__main__":
-    main()
+    out = {}
+    for thr in (0.3, 0.5, 0.7):
+        r, A, dec = run(thr); out.update(r)
+    OUT.mkdir(exist_ok=True); (OUT / "results.json").write_text(json.dumps(out, indent=2)); print(json.dumps(out, indent=2))
