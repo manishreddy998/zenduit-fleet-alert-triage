@@ -63,6 +63,7 @@ Leave one trip out: the ranker is always trained on the other 3 trips. The hard 
 ## How to run
 ```bash
 pip install -r requirements.txt
+bash scripts/download_data.sh            # real trips from GitHub, about 40 MB
 python -m fleettriage.evaluate          # baselines + hybrid
 python -m fleettriage.llm_judge         # Qwen judge, replays data/llm_cache.json
 LLM=ollama python -m fleettriage.llm_judge   # live, needs ollama with qwen2.5-3b
